@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lantern Keeper</title>
+<style>
+html,body{margin:0;height:100%;background:#07060f;color:#f0e8d2;font-family:Georgia,serif}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center}
+canvas{max-width:100%;max-height:90vh;aspect-ratio:1/1;border:2px solid #ffbe50;border-radius:8px;box-shadow:0 0 30px #ffbe5044;touch-action:none}
+p{opacity:.7;font-size:13px;margin:6px}
+#pad{display:none;gap:8px;margin-top:6px}
+#pad button{width:54px;height:54px;font-size:22px;border-radius:10px;border:0;background:#ffbe50;color:#1d1a2b}
+@media (pointer:coarse){#pad{display:grid;grid-template-columns:repeat(3,54px)}}
+</style>
+</head>
+<body>
+<canvas id="c" width="640" height="640"></canvas>
+<p>Arrows / WASD to move &middot; P = pause &middot; Enter or click to start</p>
+<div id="pad"><span></span><button data-k="w">▲</button><span></span><button data-k="a">◀</button><button data-k="s">▼</button><button data-k="d">▶</button></div>
+<script>
+const cv=document.getElementById('c'),x=cv.getContext('2d'),W=640,H=640,PR=12;
+const AMBER='#ffbe50',RED='#ff4650',BLUE='#78beff',FLY='#c8ff78';
+// ---- sound (generated) ----
+let ac=null;
+function beep(f,d,t='sine',v=.12){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.type=t;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(ac.destination);g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.start();o.stop(ac.currentTime+d)}catch(e){}}
+const sfx={fly:()=>{beep(880,.07);setTimeout(()=>beep(1170,.09),70)},flask:()=>{beep(300,.1);setTimeout(()=>beep(500,.15),90)},hit:()=>beep(120,.35,'sawtooth',.2),over:()=>{beep(260,.25,'square');setTimeout(()=>beep(160,.5,'square'),250)}};
+// ---- state ----
+let state='start',s,hi=0,keys={},last=0;
+const lvl=()=>1+Math.floor(s.collected/5);
+function hitsWall(px,py){return s.walls.some(w=>px+PR>w.x&&px-PR<w.x+w.w&&py+PR>w.y&&py-PR<w.y+w.h)}
+function freePos(far){for(;;){const p={x:30+Math.random()*(W-60),y:30+Math.random()*(H-60)};
+ if(!hitsWall(p.x,p.y)&&Math.hypot(p.x-s.px,p.y-s.py)>far)return p}}
+function reset(){s={px:W/2,py:H/2,score:0,lives:3,oil:100,collected:0,inv:0,t:0,walls:[],flies:[],ghosts:[],flask:null};
+ while(s.walls.length<7){const w={x:40+Math.random()*(W-190),y:40+Math.random()*(H-190),w:[30,90,130][Math.random()*3|0],h:[30,90,130][Math.random()*3|0]};
+  if(!(W/2>w.x-60&&W/2<w.x+w.w+60&&H/2>w.y-60&&H/2<w.y+w.h+60))s.walls.push(w)}
+ for(let i=0;i<6;i++)s.flies.push(freePos(100));s.ghosts.push(freePos(250))}
+function update(dt){
+ let dx=(keys.arrowright||keys.d?1:0)-(keys.arrowleft||keys.a?1:0),dy=(keys.arrowdown||keys.s?1:0)-(keys.arrowup||keys.w?1:0);
+ if(dx&&dy){dx*=.707;dy*=.707}
+ let nx=Math.min(W-PR,Math.max(PR,s.px+dx*200*dt));if(!hitsWall(nx,s.py))s.px=nx;
+ let ny=Math.min(H-PR,Math.max(PR,s.py+dy*200*dt));if(!hitsWall(s.px,ny))s.py=ny;
+ s.oil-=(4+lvl()*.6)*dt;s.inv=Math.max(0,s.inv-dt);s.t+=dt;
+ s.flies.forEach((f,i)=>{if(Math.hypot(f.x-s.px,f.y-s.py)<PR+8){s.flies[i]=freePos(100);s.score+=10;s.collected++;s.oil=Math.min(100,s.oil+8);sfx.fly()}});  // circle collision
+ if(!s.flask&&Math.random()<dt*.15)s.flask=freePos(100);
+ if(s.flask&&Math.hypot(s.flask.x-s.px,s.flask.y-s.py)<PR+10){s.oil=Math.min(100,s.oil+35);s.flask=null;sfx.flask()}
+ while(s.ghosts.length<Math.min(7,1+lvl()))s.ghosts.push(freePos(250));
+ s.ghosts.forEach((g,i)=>{const a=Math.atan2(s.py-g.y,s.px-g.x),sp=55+lvl()*12;g.x+=Math.cos(a)*sp*dt;g.y+=Math.sin(a)*sp*dt;
+  if(s.inv<=0&&Math.hypot(g.x-s.px,g.y-s.py)<PR+14){s.lives--;s.inv=1.5;s.ghosts[i]=freePos(250);sfx.hit()}});
+ if(s.lives<=0||s.oil<=0){state='over';hi=Math.max(hi,s.score);sfx.over()}}
+// ---- drawing ----
+function txt(t,px,py,c,sz=22,al='center'){x.fillStyle=c;x.font=`bold ${sz}px Georgia,serif`;x.textAlign=al;x.textBaseline='middle';x.fillText(t,px,py)}
+function floor(){x.fillStyle='#1e2432';x.fillRect(0,0,W,H);x.strokeStyle='#252c3e';x.lineWidth=1;x.beginPath();for(let i=0;i<=W;i+=40){x.moveTo(i,0);x.lineTo(i,H);x.moveTo(0,i);x.lineTo(W,i)}x.stroke()}
+function overlay(lines){x.fillStyle='rgba(4,3,12,.88)';x.fillRect(0,0,W,H);let y=170;lines.forEach(([t,sz,c])=>{txt(t,W/2,y,c,sz);y+=sz>40?64:34})}
+function glow(px,py,r,c){x.save();x.shadowBlur=r;x.shadowColor=c;x.fillStyle=c;x.beginPath();x.arc(px,py,4,0,7);x.fill();x.restore()}
+function draw(){
+ floor();
+ if(state==='start'){overlay([['LANTERN KEEPER',54,AMBER],['Your light is your life.',22,'#f0e8d2'],['Collect fireflies: +10 score, +8 oil',17,FLY],['Blue flask: +35 oil',17,BLUE],['Less oil = smaller light. Ghosts hide in the dark!',17,RED],['Arrows / WASD / buttons to move   P = pause',17,'#f0e8d2'],['PRESS ENTER OR CLICK TO BEGIN',22,AMBER]]);return}
+ s.walls.forEach(w=>{x.fillStyle='#46425a';x.fillRect(w.x,w.y,w.w,w.h);x.strokeStyle='#6e6882';x.lineWidth=3;x.strokeRect(w.x,w.y,w.w,w.h)});
+ s.ghosts.forEach(g=>{x.fillStyle='#bed0f0';x.beginPath();x.arc(g.x,g.y,14,Math.PI,0);x.lineTo(g.x+14,g.y+14);x.lineTo(g.x-14,g.y+14);x.closePath();x.fill()});
+ if(s.inv<=0||Math.floor(s.t*10)%2){x.fillStyle='#f0e8d2';x.beginPath();x.arc(s.px,s.py,PR,0,7);x.fill();x.fillStyle=AMBER;x.beginPath();x.arc(s.px+9,s.py-4,5,0,7);x.fill()}
+ const r=70+s.oil*1.4+(Math.random()*4-2);                           // LIGHT RADIUS = OIL
+ const gr=x.createRadialGradient(s.px,s.py,r*.15,s.px,s.py,r);gr.addColorStop(0,'rgba(4,3,12,0)');gr.addColorStop(1,'rgba(4,3,12,.95)');
+ x.fillStyle=gr;x.fillRect(0,0,W,H);
+ s.ghosts.forEach(g=>{x.fillStyle=RED;[-5,5].forEach(o=>{x.beginPath();x.arc(g.x+o,g.y-3,3,0,7);x.fill()})});
+ const pu=1+.25*Math.sin(s.t*6);s.flies.forEach(f=>glow(f.x,f.y,18*pu,FLY));
+ if(s.flask){x.save();x.shadowBlur=22;x.shadowColor=BLUE;x.fillStyle=BLUE;x.fillRect(s.flask.x-6,s.flask.y-8,12,16);x.restore()}
+ txt('SCORE '+s.score,14,24,'#f0e8d2',22,'left');txt('LEVEL '+lvl(),W/2,24,AMBER);
+ for(let i=0;i<s.lives;i++){x.fillStyle=RED;x.beginPath();x.arc(W-24-i*24,24,9,0,7);x.fill()}
+ x.fillStyle='#323246';x.fillRect(14,44,160,14);x.fillStyle=s.oil>25?AMBER:RED;x.fillRect(14,44,160*Math.max(0,s.oil)/100,14);txt('OIL',182,51,'#f0e8d2',17,'left');
+ if(state==='paused')overlay([['PAUSED',54,AMBER],['Press P to resume',22,'#f0e8d2']]);
+ if(state==='over')overlay([['GAME OVER',54,RED],[s.oil<=0?'Your lantern went out...':'The ghosts got you...',22,'#f0e8d2'],[`Score ${s.score}   Level ${lvl()}   Best ${hi}`,22,AMBER],['ENTER OR CLICK TO PLAY AGAIN',22,BLUE]])}
+function loop(ts){const dt=Math.min(.05,(ts-last)/1000||0);last=ts;if(state==='playing')update(dt);draw();requestAnimationFrame(loop)}
+function begin(){reset();state='playing'}
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();keys[k]=true;if(k.startsWith('arrow')||k===' ')e.preventDefault();
+ if(k==='p'){if(state==='playing')state='paused';else if(state==='paused')state='playing'}
+ if((k==='enter'||k===' ')&&(state==='start'||state==='over'))begin()});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+cv.addEventListener('click',()=>{if(state==='start'||state==='over')begin()});
+document.querySelectorAll('#pad button').forEach(b=>{const k=b.dataset.k;
+ b.addEventListener('touchstart',e=>{keys[k]=true;e.preventDefault()},{passive:false});
+ b.addEventListener('touchend',()=>{keys[k]=false})});
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
